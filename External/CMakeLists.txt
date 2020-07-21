@@ -1,0 +1,1 @@
+add_subdirectory(CustomPlugin EXCLUDE_FROM_ALL)

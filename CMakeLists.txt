@@ -32,6 +32,9 @@ add_subdirectory(Core EXCLUDE_FROM_ALL)
 add_subdirectory(Plugins EXCLUDE_FROM_ALL)
 add_subdirectory(Polyfills EXCLUDE_FROM_ALL)
 
+# custom subdirectory
+add_subdirectory(External EXCLUDE_FROM_ALL)
+
 get_directory_property(hasParent PARENT_DIRECTORY)
 if(hasParent)
     add_subdirectory(Apps EXCLUDE_FROM_ALL)

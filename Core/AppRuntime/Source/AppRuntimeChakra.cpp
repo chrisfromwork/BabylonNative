@@ -46,10 +46,11 @@ namespace Babylon
             &dispatchFunction));
         ThrowIfFailed(JsProjectWinRTNamespace(L"Windows"));
 
-#ifdef _DEBUG
-        // Put Chakra in debug mode.
-        ThrowIfFailed(JsStartDebugging());
-#endif
+// Not supported on HoloLens 2
+//#ifdef _DEBUG
+//        // Put Chakra in debug mode.
+//        ThrowIfFailed(JsStartDebugging());
+//#endif
 
         Napi::Env env = Napi::Attach();
         Run(env);

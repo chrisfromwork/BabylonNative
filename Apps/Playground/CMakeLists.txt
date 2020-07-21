@@ -107,6 +107,7 @@ endif()
 
 target_include_directories(Playground PRIVATE "Source" ".")
 
+# CustomPlugin reference added below
 target_link_to_dependencies(Playground
     PRIVATE AppRuntime
     PRIVATE NativeWindow
@@ -115,6 +116,7 @@ target_link_to_dependencies(Playground
     PRIVATE Window
     PRIVATE ScriptLoader
     PRIVATE XMLHttpRequest
+    PRIVATE CustomPlugin
     ${ADDITIONAL_LIBRARIES})
 
 if(WIN32)

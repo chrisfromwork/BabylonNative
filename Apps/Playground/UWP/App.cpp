@@ -7,6 +7,7 @@
 #include <Babylon/Polyfills/Console.h>
 #include <Babylon/Polyfills/Window.h>
 #include <Babylon/Polyfills/XMLHttpRequest.h>
+#include <Babylon/Plugins/CustomPlugin.h>
 
 #include <pplawait.h>
 #include <winrt/Windows.ApplicationModel.h>
@@ -171,6 +172,9 @@ void App::RestartRuntime(Windows::Foundation::Rect bounds)
 
         // Initialize NativeXr plugin.
         Babylon::Plugins::NativeXr::Initialize(env);
+
+        // Initialize Custom plugin.
+        Babylon::Plugins::CustomPlugin::Initialize(env);
 
         auto& jsRuntime = Babylon::JsRuntime::GetFromJavaScript(env);
         inputBuffer = std::make_unique<InputManager::InputBuffer>(jsRuntime);

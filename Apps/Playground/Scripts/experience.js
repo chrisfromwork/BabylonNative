@@ -3,7 +3,7 @@ var turntable = false;
 var logfps = true;
 var ibl = false;
 var rtt = false;
-var vr = false;
+var vr = true;
 var ar = false;
 var xrHitTest = false;
 var text = false;
@@ -51,6 +51,13 @@ function CreateInputHandling(scene) {
 
 var engine = new BABYLON.NativeEngine();
 var scene = new BABYLON.Scene(engine);
+
+// Testing custom plugin functions
+console.log("Testing custom plugin class functions.");
+console.log("Current Date and Time: " + CustomPluginClass.getDateAndTime);
+console.log("First Instance Creation Date and Time:" + customPluginClass.getCreationDateAndTime);
+let tempCustomPluginClass = new CustomPluginClass();
+console.log("Second Instance Creation Date and Time:" + tempCustomPluginClass.getCreationDateAndTime);
 
 CreateBoxAsync().then(function () {
 //CreateSpheresAsync().then(function () {
@@ -172,7 +179,6 @@ CreateBoxAsync().then(function () {
             }
         );
     }
-    
 }, function (ex) {
     console.log(ex.message, ex.stack);
 });
