@@ -57,6 +57,41 @@ namespace xr
             };
         };
 
+        struct TypeConverter
+        {
+            static inline NativeReferenceSpaceType GetNativeReferenceSpaceType(XrReferenceSpaceType type)
+            {
+                // Update as needed
+                switch (type)
+                {
+                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_LOCAL: return NativeReferenceSpaceType::LOCAL;
+                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_VIEW: return NativeReferenceSpaceType::VIEWER;
+                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_STAGE: return NativeReferenceSpaceType::BOUNDED_FLOOR;
+                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT:
+                default:
+                    return NativeReferenceSpaceType::UNBOUNDED;
+                }                
+            }
+
+            static inline XrReferenceSpaceType GetXrReferenceSpaceType(NativeReferenceSpaceType type)
+            {
+                // Update as needed
+                switch (type)
+                {
+                case NativeReferenceSpaceType::LOCAL_FLOOR:
+                case NativeReferenceSpaceType::BOUNDED_FLOOR:
+                    return XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_STAGE;
+                case NativeReferenceSpaceType::LOCAL:
+                    return XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_LOCAL;
+                case NativeReferenceSpaceType::VIEWER:
+                    return XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_VIEW;
+                case NativeReferenceSpaceType::UNBOUNDED:
+                default:
+                    return XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT;
+                }
+            }
+        };
+
         uint32_t AquireAndWaitForSwapchainImage(XrSwapchain handle)
         {
             uint32_t swapchainImageIndex;
@@ -135,7 +170,7 @@ namespace xr
                 SystemId = XR_NULL_SYSTEM_ID;
                 return false;
             }
-            else if(!XR_SUCCEEDED(result))
+            else if (!XR_SUCCEEDED(result))
             {
                 throw std::runtime_error{ "SystemId initialization failed with unexpected result type." };
             }
@@ -160,8 +195,8 @@ namespace xr
         const System::Impl& HmdImpl;
         XrSession Session{ XR_NULL_HANDLE };
 
-        XrSpace SceneSpace{ XR_NULL_HANDLE };
-        XrReferenceSpaceType SceneSpaceType{};
+        std::vector<std::shared_ptr<ReferenceSpace::Impl>> XrSpaces;
+        std::shared_ptr<ReferenceSpace::Impl> CurrXrSceneSpace;
 
         static constexpr uint32_t LeftSide = 0;
         static constexpr uint32_t RightSide = 1;
@@ -237,18 +272,23 @@ namespace xr
             XrCheck(xrCreateSession(instance, &createInfo, &Session));
 
             // Initialize scene space
+            XrReferenceSpaceType sceneSpaceType{};
             if (HmdImpl.Extensions->UnboundedRefSpaceSupported)
             {
-                SceneSpaceType = XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT;
+                sceneSpaceType = XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT;
             }
             else
             {
-                SceneSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+                sceneSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
             }
             XrReferenceSpaceCreateInfo spaceCreateInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
-            spaceCreateInfo.referenceSpaceType = SceneSpaceType;
+            spaceCreateInfo.referenceSpaceType = sceneSpaceType;
             spaceCreateInfo.poseInReferenceSpace = IDENTITY_TRANSFORM;
-            XrCheck(xrCreateReferenceSpace(Session, &spaceCreateInfo, &SceneSpace));
+            XrSpace sceneSpace{ XR_NULL_HANDLE };
+            XrCheck(xrCreateReferenceSpace(Session, &spaceCreateInfo, &sceneSpace));
+
+            CurrXrSceneSpace = std::make_shared<ReferenceSpace::Impl>(sceneSpace, sceneSpaceType);
+            XrSpaces.push_back(CurrXrSceneSpace);
 
             InitializeRenderResources(instance, systemId);
             InitializeActionResources(instance);
@@ -277,6 +317,18 @@ namespace xr
         {
             const auto& swapchain = RenderResources.ColorSwapchains[viewIndex];
             return{ static_cast<size_t>(swapchain.Width), static_cast<size_t>(swapchain.Height) };
+        }
+
+        bool TryGetReferenceSpace(NativeReferenceSpaceType type, std::shared_ptr<ReferenceSpace>& referenceSpace)
+        {
+            // TODO
+            return false;
+        }
+
+        bool TryCreateReferenceSpace(NativeReferenceSpaceType type, std::shared_ptr<ReferenceSpace>& referenceSpace)
+        {
+            // TODO
+            return false;
         }
 
     private:
@@ -552,7 +604,7 @@ namespace xr
     struct System::Session::Frame::Impl
     {
         Impl(Session::Impl& sessionImpl)
-            : sessionImpl{sessionImpl}
+            : sessionImpl{ sessionImpl }
         {
         }
 
@@ -584,18 +636,18 @@ namespace xr
         {
             uint32_t viewCapacityInput = static_cast<uint32_t>(renderResources.Views.size());
             uint32_t viewCountOutput;
-        
+
             XrViewState viewState{ XR_TYPE_VIEW_STATE };
             XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
             viewLocateInfo.viewConfigurationType = System::Impl::VIEW_CONFIGURATION_TYPE;
             viewLocateInfo.displayTime = m_impl->displayTime;
-            viewLocateInfo.space = m_impl->sessionImpl.SceneSpace;
+            viewLocateInfo.space = m_impl->sessionImpl.CurrXrSceneSpace->Space;
             XrCheck(xrLocateViews(session, &viewLocateInfo, &viewState, viewCapacityInput, &viewCountOutput, renderResources.Views.data()));
             assert(viewCountOutput == viewCapacityInput);
             assert(viewCountOutput == renderResources.ConfigViews.size());
             assert(viewCountOutput == renderResources.ColorSwapchains.size());
             assert(viewCountOutput == renderResources.DepthSwapchains.size());
-        
+
             renderResources.ProjectionLayerViews.resize(viewCountOutput);
             if (m_impl->sessionImpl.HmdImpl.Extensions->DepthExtensionSupported)
             {
@@ -603,7 +655,7 @@ namespace xr
             }
 
             Views.resize(viewCountOutput);
-        
+
             // Prepare rendering parameters of each view for swapchain texture arrays
             for (uint32_t idx = 0; idx < viewCountOutput; ++idx)
             {
@@ -641,14 +693,14 @@ namespace xr
                 view.DepthTextureSize.Height = depthSwapchain.Height;
                 view.DepthNearZ = sessionImpl.DepthNearZ;
                 view.DepthFarZ = sessionImpl.DepthFarZ;
-        
+
                 renderResources.ProjectionLayerViews[idx] = { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW };
                 renderResources.ProjectionLayerViews[idx].pose = renderResources.Views[idx].pose;
                 renderResources.ProjectionLayerViews[idx].fov = renderResources.Views[idx].fov;
                 renderResources.ProjectionLayerViews[idx].subImage.swapchain = colorSwapchain.Handle;
                 renderResources.ProjectionLayerViews[idx].subImage.imageRect = imageRect;
                 renderResources.ProjectionLayerViews[idx].subImage.imageArrayIndex = 0;
-        
+
                 if (sessionImpl.HmdImpl.Extensions->DepthExtensionSupported)
                 {
                     renderResources.DepthInfoViews[idx] = { XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR };
@@ -659,7 +711,7 @@ namespace xr
                     renderResources.DepthInfoViews[idx].subImage.swapchain = depthSwapchain.Handle;
                     renderResources.DepthInfoViews[idx].subImage.imageRect = imageRect;
                     renderResources.DepthInfoViews[idx].subImage.imageArrayIndex = 0;
-        
+
                     // Chain depth info struct to the corresponding projection layer views's next
                     renderResources.ProjectionLayerViews[idx].next = &renderResources.DepthInfoViews[idx];
                 }
@@ -681,7 +733,7 @@ namespace xr
                 {
                     XrSpace space = actionResources.ControllerGripPoseSpaces[idx];
                     XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
-                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.SceneSpace, m_impl->displayTime, &location));
+                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.CurrXrSceneSpace->Space, m_impl->displayTime, &location));
 
                     constexpr XrSpaceLocationFlags RequiredFlags =
                         XR_SPACE_LOCATION_POSITION_VALID_BIT |
@@ -708,7 +760,7 @@ namespace xr
                 {
                     XrSpace space = actionResources.ControllerAimPoseSpaces[idx];
                     XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
-                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.SceneSpace, m_impl->displayTime, &location));
+                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.CurrXrSceneSpace->Space, m_impl->displayTime, &location));
 
                     constexpr XrSpaceLocationFlags RequiredFlags =
                         XR_SPACE_LOCATION_POSITION_VALID_BIT |
@@ -751,7 +803,7 @@ namespace xr
         if (m_impl->shouldRender)
         {
             auto& renderResources = m_impl->sessionImpl.RenderResources;
-        
+
             XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 
             for (auto& swapchain : renderResources.ColorSwapchains)
@@ -763,16 +815,16 @@ namespace xr
             {
                 XrAssert(xrReleaseSwapchainImage(swapchain.Handle, &releaseInfo));
             }
-        
+
             // Inform the runtime to consider alpha channel during composition
             // The primary display on Hololens has additive environment blend mode. It will ignore alpha channel.
             // But mixed reality capture has alpha blend mode display and use alpha channel to blend content to environment.
             layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-        
-            layer.space = m_impl->sessionImpl.SceneSpace;
+
+            layer.space = m_impl->sessionImpl.CurrXrSceneSpace->Space;
             layer.viewCount = static_cast<uint32_t>(renderResources.ProjectionLayerViews.size());
             layer.views = renderResources.ProjectionLayerViews.data();
-        
+
             layersPtr = reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer);
         }
 
@@ -785,7 +837,7 @@ namespace xr
             // frame (and not for each eye backbuffer).
             ID3D11Texture2D* texture = reinterpret_cast<ID3D11Texture2D*>(Views.front().ColorTexturePointer);
             int dummy;
-            texture->SetPrivateData({0xD4544440, 0x90B9, 0x4815, 0x8B, 0x99, 0x18, 0xC0, 0x23, 0xA5, 0x73, 0xF1}, sizeof(dummy), &dummy);
+            texture->SetPrivateData({ 0xD4544440, 0x90B9, 0x4815, 0x8B, 0x99, 0x18, 0xC0, 0x23, 0xA5, 0x73, 0xF1 }, sizeof(dummy), &dummy);
         }
 #endif
 
@@ -852,6 +904,16 @@ namespace xr
         m_impl->DepthFarZ = depthFar;
     }
 
+    bool System::Session::TryGetReferenceSpace(NativeReferenceSpaceType type, std::shared_ptr<ReferenceSpace>& referenceSpace)
+    {
+        return m_impl->TryGetReferenceSpace(type, referenceSpace);
+    }
+
+    bool System::Session::TryCreateReferenceSpace(NativeReferenceSpaceType type, std::shared_ptr<ReferenceSpace>& referenceSpace)
+    {
+        return m_impl->TryCreateReferenceSpace(type, referenceSpace);
+    }
+
     Anchor System::Session::Frame::CreateAnchor(Pose, NativeTrackablePtr) const
     {
         throw std::runtime_error("Anchors not yet implemented for OpenXR.");
@@ -865,5 +927,66 @@ namespace xr
     void System::Session::Frame::DeleteAnchor(Anchor&) const
     {
         throw std::runtime_error("Anchors not yet implemented for OpenXR.");
+    }
+
+    std::shared_ptr<System::Session::ReferenceSpace> System::Session::Frame::GetReferenceSpace() const
+    {
+        // TODO
+        return nullptr;
+    }
+
+    struct System::Session::ReferenceSpace::Impl
+    {
+        XrSpace Space{ XR_NULL_HANDLE };
+        XrReferenceSpaceType Type{};
+
+        Impl(XrSpace space, XrReferenceSpaceType type)
+        {
+            Space = space;
+            Type = type;
+        }
+
+        bool TryCreateReferenceSpaceAtOffset(Pose pose, std::shared_ptr<ReferenceSpace>& referenceSpace)
+        {
+            return false;
+        }
+
+        NativeReferenceSpaceType GetType() const
+        {
+            return TypeConverter::GetNativeReferenceSpaceType(Type);
+        }
+
+        Pose GetTransform() const
+        {
+            if (Space == nullptr)
+            {
+                return Pose{};
+            }
+
+            XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
+            XrCheck(xrLocateSpace(space, baseSpace, time, &spaceLocation));
+            xrReferenceSpace
+            return Pose{};
+        }
+    };
+
+    System::Session::ReferenceSpace::ReferenceSpace()
+        : m_impl{ std::make_unique<ReferenceSpace::Impl>() }
+    {
+    }
+
+    bool System::Session::ReferenceSpace::TryCreateReferenceSpaceAtOffset(Pose pose, std::shared_ptr<ReferenceSpace>& referenceSpace)
+    {
+        return m_impl->TryCreateReferenceSpaceAtOffset(pose, referenceSpace);
+    }
+    
+    NativeReferenceSpaceType System::Session::ReferenceSpace::GetType() const
+    {
+        return m_impl->GetType();
+    }
+
+    Pose System::Session::ReferenceSpace::GetTransform() const
+    {
+        return m_impl->GetTransform();
     }
 }
