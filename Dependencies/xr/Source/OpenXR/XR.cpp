@@ -719,7 +719,7 @@ namespace xr
             XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
             viewLocateInfo.viewConfigurationType = System::Impl::VIEW_CONFIGURATION_TYPE;
             viewLocateInfo.displayTime = sessionImpl.FrameTime.PredictedDisplayTime;
-            viewLocateInfo.space = m_impl->sessionImpl.CurrXrSceneSpace->m_impl->Space;
+            viewLocateInfo.space = static_cast<XrSpace>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent());
             XrCheck(xrLocateViews(session, &viewLocateInfo, &viewState, viewCapacityInput, &viewCountOutput, renderResources.Views.data()));
             assert(viewCountOutput == viewCapacityInput);
             assert(viewCountOutput == renderResources.ConfigViews.size());
@@ -811,7 +811,7 @@ namespace xr
                 {
                     XrSpace space = actionResources.ControllerGripPoseSpaces[idx];
                     XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
-                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.CurrXrSceneSpace->m_impl->Space, sessionImpl.FrameTime.PredictedDisplayTime, &location));
+                    XrCheck(xrLocateSpace(space, static_cast<XrSpace>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent()), sessionImpl.FrameTime.PredictedDisplayTime, &location));
 
                     constexpr XrSpaceLocationFlags RequiredFlags =
                         XR_SPACE_LOCATION_POSITION_VALID_BIT |
@@ -838,7 +838,7 @@ namespace xr
                 {
                     XrSpace space = actionResources.ControllerAimPoseSpaces[idx];
                     XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
-                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.CurrXrSceneSpace->m_impl->Space, sessionImpl.FrameTime.PredictedDisplayTime, &location));
+                    XrCheck(xrLocateSpace(space, static_cast<XrSpace>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent()), sessionImpl.FrameTime.PredictedDisplayTime, &location));
 
                     constexpr XrSpaceLocationFlags RequiredFlags =
                         XR_SPACE_LOCATION_POSITION_VALID_BIT |
@@ -899,7 +899,7 @@ namespace xr
             // But mixed reality capture has alpha blend mode display and use alpha channel to blend content to environment.
             layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
 
-            layer.space = m_impl->sessionImpl.CurrXrSceneSpace->m_impl->Space;
+            layer.space = static_cast<XrSpace>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent());
             layer.viewCount = static_cast<uint32_t>(renderResources.ProjectionLayerViews.size());
             layer.views = renderResources.ProjectionLayerViews.data();
 
@@ -1038,8 +1038,13 @@ namespace xr
         return m_impl->TryCreateReferenceSpaceAtOffset(pose, referenceSpace);
     }
     
-    xr::System::Session::ReferenceSpace::Type System::Session::ReferenceSpace::GetType() const
+    System::Session::ReferenceSpace::Type System::Session::ReferenceSpace::GetType() const
     {
         return m_impl->GetType();
+    }
+
+    System::Session::ReferenceSpace::NativeReferenceSpacePtr System::Session::ReferenceSpace::GetNativeComponent()
+    {
+        return static_cast<void*>(m_impl->Space);
     }
 }

@@ -94,6 +94,7 @@ namespace xr
             {
             public:
                 typedef std::string Type;
+                typedef void* NativeReferenceSpacePtr;
 
                 static constexpr auto VIEWER{ "viewer" };
                 static constexpr auto LOCAL{ "local" };
@@ -113,7 +114,9 @@ namespace xr
                 ReferenceSpace(System::Session::Impl&, const Type&, Pose);
                 bool TryCreateReferenceSpaceAtOffset(Pose, std::shared_ptr<ReferenceSpace>&);
                 Type GetType() const;
+                NativeReferenceSpacePtr GetNativeComponent();
 
+            private:
                 struct Impl;
                 std::unique_ptr<Impl> m_impl{};
             };
