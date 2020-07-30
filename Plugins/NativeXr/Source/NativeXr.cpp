@@ -214,12 +214,12 @@ namespace Babylon
             m_session->SetDepthsNearFar(depthNear, depthFar);
         }
 
-        bool TryGetReferenceSpace(xr::NativeReferenceSpaceType type, std::shared_ptr<xr::System::Session::ReferenceSpace>& referenceSpace)
+        bool TryGetReferenceSpace(xr::System::Session::ReferenceSpace::Type type, std::shared_ptr<xr::System::Session::ReferenceSpace>& referenceSpace)
         {
             return m_session->TryGetReferenceSpace(type, referenceSpace);
         }
 
-        bool TryCreateReferenceSpace(xr::NativeReferenceSpaceType type, std::shared_ptr<xr::System::Session::ReferenceSpace>& referenceSpace)
+        bool TryCreateReferenceSpace(xr::System::Session::ReferenceSpace::Type type, std::shared_ptr<xr::System::Session::ReferenceSpace>& referenceSpace)
         {
             return m_session->TryCreateReferenceSpace(type, referenceSpace);
         }
@@ -790,7 +790,7 @@ namespace Babylon
             {
             }
 
-            void Update(const Napi::CallbackInfo& /*info*/, const xr::Pose& pose)
+            void Update(const xr::Pose& pose)
             {
                 // Update the transform.
                 m_transform.Update(pose);
@@ -968,16 +968,12 @@ namespace Babylon
 
             static Napi::Object New(const Napi::CallbackInfo& info, std::shared_ptr<xr::System::Session::ReferenceSpace> nativeRefSpace)
             {
-                auto napiReferenceSpace = info.Env().Global().Get(JS_CLASS_NAME).As<Napi::Function>().New({info[0]});
-                auto xrReferenceSpace = XRReferenceSpace::Unwrap(napiReferenceSpace);
+                auto napiObject = info.Env().Global().Get(JS_CLASS_NAME).As<Napi::Function>().New({info[0]});
+                auto napiPersistedObject = Napi::Persistent(napiObject);
+                auto xrReferenceSpace = XRReferenceSpace::Unwrap(napiObject);
                 xrReferenceSpace->SetReferenceSpace(nativeRefSpace);
 
-                auto napiTransform = Napi::Persistent(XRRigidTransform::New(info));
-                auto xrTransform = XRRigidTransform::Unwrap(napiTransform.Value());
-                xrTransform->Update(nativeRefSpace->GetTransform());
-                
-                xrReferenceSpace->SetTransform(xrTransform);
-                return napiReferenceSpace;
+                return napiObject;
             }
 
             XRReferenceSpace(const Napi::CallbackInfo& info)
@@ -986,21 +982,15 @@ namespace Babylon
                 // This constructor should not be called by Javascript code. Any way to prevent?
             }
 
-            XRRigidTransform* GetTransform()
+            std::shared_ptr<xr::System::Session::ReferenceSpace> GetReferenceSpace()
             {
-                m_transform->Update(m_referenceSpace->GetTransform());
-                return m_transform;
+                return m_referenceSpace;
             }
 
         private:
             void SetReferenceSpace(std::shared_ptr<xr::System::Session::ReferenceSpace> referenceSpace)
             {
                 m_referenceSpace = referenceSpace;
-            }
-
-            void SetTransform(XRRigidTransform* transform)
-            {
-                m_transform = transform;
             }
 
             Napi::Value GetOffsetReferenceSpace(const Napi::CallbackInfo& info)
@@ -1018,7 +1008,6 @@ namespace Babylon
             }
 
             std::shared_ptr<xr::System::Session::ReferenceSpace> m_referenceSpace;
-            XRRigidTransform* m_transform;
         };
 
         // Implementation of the XRAnchor interface: https://immersive-web.github.io/anchors/#xr-anchor
@@ -1074,14 +1063,8 @@ namespace Babylon
             }
 
         private:
-            Napi::Value GetAnchorSpace(const Napi::CallbackInfo& info)
+            Napi::Value GetAnchorSpace(const Napi::CallbackInfo& /*info*/)
             {
-                // TODO
-                //Napi::Object napiTransform = XRRigidTransform::New(info);
-                //XRRigidTransform* rigidTransform = XRRigidTransform::Unwrap(napiTransform);
-                //rigidTransform->Update(m_nativeAnchor.Pose);
-
-                //Napi::Object napiSpace = XRReferenceSpace::New(info.Env(), napiTransform);
                 return m_referenceSpace->Value();
             }
 
@@ -1219,7 +1202,7 @@ namespace Babylon
                 // TODO: Once multiple reference views are supported, we need to convert the values into the passed in reference space.
                 Napi::Object napiPose = XRPose::New(info);
                 XRPose* pose = XRPose::Unwrap(napiPose);
-                pose->Update(info, m_hitResult.Pose);
+                pose->Update(m_hitResult.Pose);
 
                 return std::move(napiPose);
             }
@@ -1291,8 +1274,11 @@ namespace Babylon
                 std::shared_ptr<xr::System::Session::ReferenceSpace> anchorReferenceSpace;
                 if (frameReferenceSpace->TryCreateReferenceSpaceAtOffset(pose, anchorReferenceSpace))
                 {
-                    auto napiReferenceSpace = Napi::Persistent(XRReferenceSpace::Unwrap(XRReferenceSpace::New(info, anchorReferenceSpace)));
-                    xrAnchor->SetReferenceSpace(napiReferenceSpace.Value());
+                    auto napiObject = XRReferenceSpace::New(info, anchorReferenceSpace);
+                    // TODO - determine correct memory management
+                    auto persistedObject = Napi::Persistent(napiObject);
+                    auto xrReferenceSpace = XRReferenceSpace::Unwrap(napiObject);
+                    xrAnchor->SetReferenceSpace(xrReferenceSpace);
                 }
 
                 // Add the anchor to the list of tracked anchors.
@@ -1323,7 +1309,7 @@ namespace Babylon
             Napi::Value GetViewerPose(const Napi::CallbackInfo& info)
             {
                 // TODO: Support reference spaces.
-                 auto& space = *XRReferenceSpace::Unwrap(info[0].As<Napi::Object>());
+                // auto& space = *XRReferenceSpace::Unwrap(info[0].As<Napi::Object>());
 
                 // Updating the reference space is currently not supported. Until it is, we assume the
                 // reference space is unmoving at identity (which is usually true).
@@ -1343,12 +1329,14 @@ namespace Babylon
                 }
                 else
                 {
-                    auto* xrSpace = XRReferenceSpace::Unwrap(info[0].As<Napi::Object>());
-                    assert(xrSpace != nullptr);
-                    Napi::Object napiPose = XRPose::New(info);
-                    XRPose* pose = XRPose::Unwrap(napiPose);
-                    pose->Update(xrSpace->GetTransform());
-                    return std::move(napiPose);
+                    // TODO - fix, not called by HoloLens/openxr
+                    //auto* xrSpace = XRReferenceSpace::Unwrap(info[0].As<Napi::Object>());
+                    //assert(xrSpace != nullptr);
+                    //Napi::Object napiPose = XRPose::New(info);
+                    //XRPose* pose = XRPose::Unwrap(napiPose);
+                    //pose->Update(xrSpace->GetTransform());
+                    //return std::move(napiPose);
+                    return m_jsPose.Value();
                 }
             }
 
@@ -1587,16 +1575,15 @@ namespace Babylon
                     napi_throw_type_error(info.Env(), nullptr, error.c_str());
                 }
 
-                const auto webXRReferenceSpaceType = info[0].As<Napi::String>().Utf8Value();
-                if (!xr::XRReferenceSpaceType::IsValid(webXRReferenceSpaceType))
+                const auto referenceSpaceType = info[0].As<Napi::String>().Utf8Value();
+                if (!xr::System::Session::ReferenceSpace::IsValidType(referenceSpaceType))
                 {
                     std::string error = "requestReferenceSpace expected string argument to be a valid WebXR XRReferenceSpace type";
                     napi_throw_type_error(info.Env(), nullptr, error.c_str());
                 }
 
-                auto type = xr::XRReferenceSpaceType::GetNativeTypeFromString(webXRReferenceSpaceType);
                 std::shared_ptr<xr::System::Session::ReferenceSpace> nativeReferenceSpace;
-                if (m_xr.TryGetReferenceSpace(type, nativeReferenceSpace))
+                if (m_xr.TryGetReferenceSpace(referenceSpaceType, nativeReferenceSpace))
                 {
                     if (m_referenceSpaces.count(nativeReferenceSpace) > 0)
                     {
@@ -1611,9 +1598,9 @@ namespace Babylon
                     }
                 }
 
-                if (!m_xr.TryCreateReferenceSpace(type, nativeReferenceSpace))
+                if (!m_xr.TryCreateReferenceSpace(referenceSpaceType, nativeReferenceSpace))
                 {
-                    std::string error = "Platform does not support requested reference space type: " + webXRReferenceSpaceType;
+                    std::string error = "Platform does not support requested reference space type: " + referenceSpaceType;
                     napi_throw_type_error(info.Env(), nullptr, error.c_str());
                 }
                

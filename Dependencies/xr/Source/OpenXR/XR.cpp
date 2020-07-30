@@ -1,6 +1,7 @@
 #include <XR.h>
 
 #include <XrPlatform.h>
+#include <FrameTime.h>
 
 #include <assert.h>
 #include <optional>
@@ -59,36 +60,36 @@ namespace xr
 
         struct TypeConverter
         {
-            static inline NativeReferenceSpaceType GetNativeReferenceSpaceType(XrReferenceSpaceType type)
+            static inline xr::System::Session::ReferenceSpace::Type GetReferenceSpaceType(XrReferenceSpaceType type)
             {
                 // Update as needed
                 switch (type)
                 {
-                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_LOCAL: return NativeReferenceSpaceType::LOCAL;
-                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_VIEW: return NativeReferenceSpaceType::VIEWER;
-                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_STAGE: return NativeReferenceSpaceType::BOUNDED_FLOOR;
+                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_LOCAL: return xr::System::Session::ReferenceSpace::LOCAL;
+                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_VIEW: return xr::System::Session::ReferenceSpace::VIEWER;
+                case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_STAGE: return xr::System::Session::ReferenceSpace::BOUNDED_FLOOR;
                 case XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT:
                 default:
-                    return NativeReferenceSpaceType::UNBOUNDED;
+                    return xr::System::Session::ReferenceSpace::UNBOUNDED;
                 }                
             }
 
-            static inline XrReferenceSpaceType GetXrReferenceSpaceType(NativeReferenceSpaceType type)
+            static inline const std::map<std::string, XrReferenceSpaceType> XrTypeMap = {
+                { xr::System::Session::ReferenceSpace::LOCAL, XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_LOCAL},
+                { xr::System::Session::ReferenceSpace::LOCAL_FLOOR, XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_STAGE},
+                { xr::System::Session::ReferenceSpace::BOUNDED_FLOOR, XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_STAGE},
+                { xr::System::Session::ReferenceSpace::VIEWER, XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_VIEW},
+                { xr::System::Session::ReferenceSpace::UNBOUNDED, XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT}
+            };
+
+            static inline XrReferenceSpaceType GetXrType(xr::System::Session::ReferenceSpace::Type type)
             {
-                // Update as needed
-                switch (type)
+                if (XrTypeMap.count(type) > 0)
                 {
-                case NativeReferenceSpaceType::LOCAL_FLOOR:
-                case NativeReferenceSpaceType::BOUNDED_FLOOR:
-                    return XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_STAGE;
-                case NativeReferenceSpaceType::LOCAL:
-                    return XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_LOCAL;
-                case NativeReferenceSpaceType::VIEWER:
-                    return XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_VIEW;
-                case NativeReferenceSpaceType::UNBOUNDED:
-                default:
-                    return XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT;
+                    return XrTypeMap.at(type);
                 }
+
+                return XrReferenceSpaceType::XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT;
             }
         };
 
@@ -192,11 +193,14 @@ namespace xr
 
     struct System::Session::Impl
     {
+        static constexpr XrPosef IDENTITY_TRANSFORM{ XrQuaternionf{ 0.f, 0.f, 0.f, 1.f }, XrVector3f{ 0.f, 0.f, 0.f } };
+
         const System::Impl& HmdImpl;
         XrSession Session{ XR_NULL_HANDLE };
 
-        std::vector<std::shared_ptr<ReferenceSpace::Impl>> XrSpaces;
-        std::shared_ptr<ReferenceSpace::Impl> CurrXrSceneSpace;
+        std::vector<std::shared_ptr<ReferenceSpace>> XrSpaces;
+        std::shared_ptr<ReferenceSpace> CurrXrSceneSpace;
+        FrameTime FrameTime;
 
         static constexpr uint32_t LeftSide = 0;
         static constexpr uint32_t RightSide = 1;
@@ -272,22 +276,9 @@ namespace xr
             XrCheck(xrCreateSession(instance, &createInfo, &Session));
 
             // Initialize scene space
-            XrReferenceSpaceType sceneSpaceType{};
-            if (HmdImpl.Extensions->UnboundedRefSpaceSupported)
-            {
-                sceneSpaceType = XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT;
-            }
-            else
-            {
-                sceneSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
-            }
-            XrReferenceSpaceCreateInfo spaceCreateInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
-            spaceCreateInfo.referenceSpaceType = sceneSpaceType;
-            spaceCreateInfo.poseInReferenceSpace = IDENTITY_TRANSFORM;
-            XrSpace sceneSpace{ XR_NULL_HANDLE };
-            XrCheck(xrCreateReferenceSpace(Session, &spaceCreateInfo, &sceneSpace));
-
-            CurrXrSceneSpace = std::make_shared<ReferenceSpace::Impl>(sceneSpace, sceneSpaceType);
+            auto spaceType = HmdImpl.Extensions->UnboundedRefSpaceSupported ? ReferenceSpace::UNBOUNDED : ReferenceSpace::LOCAL;
+            Pose identity = Pose{};
+            CurrXrSceneSpace = std::make_shared<ReferenceSpace>(*this, spaceType, identity);
             XrSpaces.push_back(CurrXrSceneSpace);
 
             InitializeRenderResources(instance, systemId);
@@ -319,21 +310,58 @@ namespace xr
             return{ static_cast<size_t>(swapchain.Width), static_cast<size_t>(swapchain.Height) };
         }
 
-        bool TryGetReferenceSpace(NativeReferenceSpaceType type, std::shared_ptr<ReferenceSpace>& referenceSpace)
+        bool IsTypeSupported(ReferenceSpace::Type type)
         {
-            // TODO
+            if (type == ReferenceSpace::LOCAL ||
+                type == ReferenceSpace::VIEWER)
+            {
+                return true;
+            }
+
+            if (type == ReferenceSpace::UNBOUNDED)
+            {
+                return HmdImpl.Extensions->UnboundedRefSpaceSupported;
+            }
+
             return false;
         }
 
-        bool TryCreateReferenceSpace(NativeReferenceSpaceType type, std::shared_ptr<ReferenceSpace>& referenceSpace)
+        bool TryGetReferenceSpace(ReferenceSpace::Type type, std::shared_ptr<ReferenceSpace>& referenceSpace)
         {
-            // TODO
+            referenceSpace = nullptr;
+            if (!IsTypeSupported(type))
+            {
+                return false;
+            }
+
+            for (auto tempSpace : XrSpaces)
+            {
+                if (tempSpace->GetType() == type)
+                {
+                    referenceSpace = tempSpace;
+                    return true;
+                }
+            }
+
             return false;
+        }
+
+        bool TryCreateReferenceSpace(ReferenceSpace::Type type, std::shared_ptr<ReferenceSpace>& referenceSpace)
+        {
+            referenceSpace = nullptr;
+            if (!IsTypeSupported(type))
+            {
+                return false;
+            }
+
+            Pose identity = Pose{};
+            auto xrReferenceSpace = std::make_shared<ReferenceSpace>(*this, type, identity);
+            XrSpaces.push_back(xrReferenceSpace);
+            referenceSpace = xrReferenceSpace;
+            return true;
         }
 
     private:
-        static constexpr XrPosef IDENTITY_TRANSFORM{ XrQuaternionf{ 0.f, 0.f, 0.f, 1.f }, XrVector3f{ 0.f, 0.f, 0.f } };
-
         void InitializeRenderResources(XrInstance instance, XrSystemId systemId)
         {
             // Read graphics properties for preferred swapchain length and logging.
@@ -601,6 +629,57 @@ namespace xr
         }
     };
 
+    struct System::Session::ReferenceSpace::Impl
+    {
+        XrSpace Space{ XR_NULL_HANDLE };
+        XrReferenceSpaceType Type{};
+
+        Impl(XrSpace space, XrReferenceSpaceType type, Session::Impl& session)
+            : sessionImpl{ session }
+        {
+            Space = space;
+            Type = type;
+        }
+
+        bool TryCreateReferenceSpaceAtOffset(Pose pose, std::shared_ptr<ReferenceSpace>& referenceSpace)
+        {
+            auto xrReferenceSpace = std::make_shared<ReferenceSpace>(sessionImpl, GetType(), pose);
+            sessionImpl.XrSpaces.push_back(xrReferenceSpace);
+            referenceSpace = xrReferenceSpace;
+            return true;
+        }
+
+        ReferenceSpace::Type GetType() const
+        {
+            return TypeConverter::GetReferenceSpaceType(Type);
+        }
+
+        Pose GetTransform() const
+        {
+            if (Space == nullptr ||
+                sessionImpl.CurrXrSceneSpace == nullptr)
+            {
+                return Pose{};
+            }
+
+            // TODO - if this is non performant we can look into assessing whether the frame time has changed
+            XrSpaceLocation spaceLocation{ XR_TYPE_SPACE_LOCATION };
+            XrCheck(xrLocateSpace(Space, sessionImpl.CurrXrSceneSpace->m_impl->Space, sessionImpl.FrameTime.PredictedDisplayTime, &spaceLocation));
+            Pose spacePose{};
+            spacePose.Position.X = spaceLocation.pose.position.x;
+            spacePose.Position.Y = spaceLocation.pose.position.y;
+            spacePose.Position.Z = spaceLocation.pose.position.z;
+            spacePose.Orientation.W = spaceLocation.pose.orientation.w;
+            spacePose.Orientation.X = spaceLocation.pose.orientation.x;
+            spacePose.Orientation.Y = spaceLocation.pose.orientation.y;
+            spacePose.Orientation.Z = spaceLocation.pose.orientation.z;
+            return spacePose;
+        }
+
+    private:
+        Session::Impl& sessionImpl;
+    };
+
     struct System::Session::Frame::Impl
     {
         Impl(Session::Impl& sessionImpl)
@@ -610,7 +689,6 @@ namespace xr
 
         Session::Impl& sessionImpl;
         bool shouldRender{};
-        int64_t displayTime{};
     };
 
     System::Session::Frame::Frame(Session::Impl& sessionImpl)
@@ -624,7 +702,7 @@ namespace xr
         XrFrameState frameState{ XR_TYPE_FRAME_STATE };
         XrCheck(xrWaitFrame(session, &frameWaitInfo, &frameState));
         m_impl->shouldRender = frameState.shouldRender;
-        m_impl->displayTime = frameState.predictedDisplayTime;
+        sessionImpl.FrameTime.Update(frameState);
 
         XrFrameBeginInfo frameBeginInfo{ XR_TYPE_FRAME_BEGIN_INFO };
         XrCheck(xrBeginFrame(session, &frameBeginInfo));
@@ -640,8 +718,8 @@ namespace xr
             XrViewState viewState{ XR_TYPE_VIEW_STATE };
             XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
             viewLocateInfo.viewConfigurationType = System::Impl::VIEW_CONFIGURATION_TYPE;
-            viewLocateInfo.displayTime = m_impl->displayTime;
-            viewLocateInfo.space = m_impl->sessionImpl.CurrXrSceneSpace->Space;
+            viewLocateInfo.displayTime = sessionImpl.FrameTime.PredictedDisplayTime;
+            viewLocateInfo.space = m_impl->sessionImpl.CurrXrSceneSpace->m_impl->Space;
             XrCheck(xrLocateViews(session, &viewLocateInfo, &viewState, viewCapacityInput, &viewCountOutput, renderResources.Views.data()));
             assert(viewCountOutput == viewCapacityInput);
             assert(viewCountOutput == renderResources.ConfigViews.size());
@@ -733,7 +811,7 @@ namespace xr
                 {
                     XrSpace space = actionResources.ControllerGripPoseSpaces[idx];
                     XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
-                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.CurrXrSceneSpace->Space, m_impl->displayTime, &location));
+                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.CurrXrSceneSpace->m_impl->Space, sessionImpl.FrameTime.PredictedDisplayTime, &location));
 
                     constexpr XrSpaceLocationFlags RequiredFlags =
                         XR_SPACE_LOCATION_POSITION_VALID_BIT |
@@ -760,7 +838,7 @@ namespace xr
                 {
                     XrSpace space = actionResources.ControllerAimPoseSpaces[idx];
                     XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
-                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.CurrXrSceneSpace->Space, m_impl->displayTime, &location));
+                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.CurrXrSceneSpace->m_impl->Space, sessionImpl.FrameTime.PredictedDisplayTime, &location));
 
                     constexpr XrSpaceLocationFlags RequiredFlags =
                         XR_SPACE_LOCATION_POSITION_VALID_BIT |
@@ -821,7 +899,7 @@ namespace xr
             // But mixed reality capture has alpha blend mode display and use alpha channel to blend content to environment.
             layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
 
-            layer.space = m_impl->sessionImpl.CurrXrSceneSpace->Space;
+            layer.space = m_impl->sessionImpl.CurrXrSceneSpace->m_impl->Space;
             layer.viewCount = static_cast<uint32_t>(renderResources.ProjectionLayerViews.size());
             layer.views = renderResources.ProjectionLayerViews.data();
 
@@ -843,7 +921,7 @@ namespace xr
 
         // Submit the composition layers for the predicted display time.
         XrFrameEndInfo frameEndInfo{ XR_TYPE_FRAME_END_INFO };
-        frameEndInfo.displayTime = m_impl->displayTime;
+        frameEndInfo.displayTime = m_impl->sessionImpl.FrameTime.PredictedDisplayTime;
         frameEndInfo.environmentBlendMode = m_impl->sessionImpl.HmdImpl.EnvironmentBlendMode;
         frameEndInfo.layerCount = m_impl->shouldRender ? 1 : 0;
         frameEndInfo.layers = &layersPtr;
@@ -904,12 +982,12 @@ namespace xr
         m_impl->DepthFarZ = depthFar;
     }
 
-    bool System::Session::TryGetReferenceSpace(NativeReferenceSpaceType type, std::shared_ptr<ReferenceSpace>& referenceSpace)
+    bool System::Session::TryGetReferenceSpace(const ReferenceSpace::Type& type, std::shared_ptr<ReferenceSpace>& referenceSpace)
     {
         return m_impl->TryGetReferenceSpace(type, referenceSpace);
     }
 
-    bool System::Session::TryCreateReferenceSpace(NativeReferenceSpaceType type, std::shared_ptr<ReferenceSpace>& referenceSpace)
+    bool System::Session::TryCreateReferenceSpace(const ReferenceSpace::Type& type, std::shared_ptr<ReferenceSpace>& referenceSpace)
     {
         return m_impl->TryCreateReferenceSpace(type, referenceSpace);
     }
@@ -931,48 +1009,28 @@ namespace xr
 
     std::shared_ptr<System::Session::ReferenceSpace> System::Session::Frame::GetReferenceSpace() const
     {
-        // TODO
-        return nullptr;
+        return m_impl->sessionImpl.CurrXrSceneSpace;
     }
 
-    struct System::Session::ReferenceSpace::Impl
+    System::Session::ReferenceSpace::ReferenceSpace(System::Session::Impl& session, const ReferenceSpace::Type& type, Pose pose)
     {
-        XrSpace Space{ XR_NULL_HANDLE };
-        XrReferenceSpaceType Type{};
+        XrReferenceSpaceType xrType = TypeConverter::GetXrType(type);
+        XrReferenceSpaceCreateInfo spaceCreateInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
+        spaceCreateInfo.referenceSpaceType = xrType;
 
-        Impl(XrSpace space, XrReferenceSpaceType type)
-        {
-            Space = space;
-            Type = type;
-        }
+        XrPosef xrPose;
+        xrPose.position.x = pose.Position.X;
+        xrPose.position.y = pose.Position.Y;
+        xrPose.position.z = pose.Position.Z;
+        xrPose.orientation.w = pose.Orientation.W;
+        xrPose.orientation.x = pose.Orientation.X;
+        xrPose.orientation.y = pose.Orientation.Y;
+        xrPose.orientation.z = pose.Orientation.Z;
+        spaceCreateInfo.poseInReferenceSpace = xrPose;
+        XrSpace xrSpace{ XR_NULL_HANDLE };
+        XrCheck(xrCreateReferenceSpace(session.Session, &spaceCreateInfo, &xrSpace));
 
-        bool TryCreateReferenceSpaceAtOffset(Pose pose, std::shared_ptr<ReferenceSpace>& referenceSpace)
-        {
-            return false;
-        }
-
-        NativeReferenceSpaceType GetType() const
-        {
-            return TypeConverter::GetNativeReferenceSpaceType(Type);
-        }
-
-        Pose GetTransform() const
-        {
-            if (Space == nullptr)
-            {
-                return Pose{};
-            }
-
-            XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
-            XrCheck(xrLocateSpace(space, baseSpace, time, &spaceLocation));
-            xrReferenceSpace
-            return Pose{};
-        }
-    };
-
-    System::Session::ReferenceSpace::ReferenceSpace()
-        : m_impl{ std::make_unique<ReferenceSpace::Impl>() }
-    {
+        this->m_impl = std::make_unique<ReferenceSpace::Impl>(xrSpace, xrType, session);
     }
 
     bool System::Session::ReferenceSpace::TryCreateReferenceSpaceAtOffset(Pose pose, std::shared_ptr<ReferenceSpace>& referenceSpace)
@@ -980,13 +1038,8 @@ namespace xr
         return m_impl->TryCreateReferenceSpaceAtOffset(pose, referenceSpace);
     }
     
-    NativeReferenceSpaceType System::Session::ReferenceSpace::GetType() const
+    xr::System::Session::ReferenceSpace::Type System::Session::ReferenceSpace::GetType() const
     {
         return m_impl->GetType();
-    }
-
-    Pose System::Session::ReferenceSpace::GetTransform() const
-    {
-        return m_impl->GetTransform();
     }
 }

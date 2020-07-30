@@ -32,59 +32,18 @@ namespace xr
     {
         struct
         {
-            float X{};
-            float Y{};
-            float Z{};
+            float X{0};
+            float Y{0};
+            float Z{0};
         } Position;
 
         struct
         {
-            float X{};
-            float Y{};
-            float Z{};
-            float W{};
+            float X{0};
+            float Y{0};
+            float Z{0};
+            float W{1};
         } Orientation;
-    };
-
-    enum class NativeReferenceSpaceType
-    {
-        VIEWER,
-        LOCAL,
-        LOCAL_FLOOR,
-        BOUNDED_FLOOR,
-        UNBOUNDED
-    };
-
-    struct XRReferenceSpaceType
-    {
-        static constexpr auto VIEWER{ "viewer" };
-        static constexpr auto LOCAL{ "local" };
-        static constexpr auto LOCAL_FLOOR{ "local-floor" };
-        static constexpr auto BOUNDED_FLOOR{ "bounded-floor" };
-        static constexpr auto UNBOUNDED{ "unbounded" };
-
-        inline static const std::unordered_map<std::string, NativeReferenceSpaceType> ReferenceSpaceTypeMap {
-            {XRReferenceSpaceType::VIEWER, NativeReferenceSpaceType::VIEWER},
-            {XRReferenceSpaceType::LOCAL, NativeReferenceSpaceType::LOCAL},
-            {XRReferenceSpaceType::LOCAL_FLOOR, NativeReferenceSpaceType::LOCAL_FLOOR},
-            {XRReferenceSpaceType::BOUNDED_FLOOR, NativeReferenceSpaceType::BOUNDED_FLOOR},
-            {XRReferenceSpaceType::UNBOUNDED, NativeReferenceSpaceType::UNBOUNDED},
-        };
-
-        static bool IsValid(const std::string& type)
-        {
-            return (type == VIEWER ||
-                type == LOCAL ||
-                type == LOCAL_FLOOR ||
-                type == BOUNDED_FLOOR ||
-                type == UNBOUNDED);
-        }
-
-        static NativeReferenceSpaceType GetNativeTypeFromString(const std::string& xrReferenceSpaceType)
-        {
-            assert(ReferenceSpaceTypeMap.count(xrReferenceSpaceType) > 0);
-            return ReferenceSpaceTypeMap.at(xrReferenceSpaceType);
-        }
     };
 
     using NativeTrackablePtr = void*;
@@ -131,16 +90,31 @@ namespace xr
             struct Impl;
 
         public:
-            struct ReferenceSpace
+            class ReferenceSpace
             {
             public:
-                struct Impl;
-                ReferenceSpace();
+                typedef std::string Type;
 
+                static constexpr auto VIEWER{ "viewer" };
+                static constexpr auto LOCAL{ "local" };
+                static constexpr auto LOCAL_FLOOR{ "local-floor" };
+                static constexpr auto BOUNDED_FLOOR{ "bounded-floor" };
+                static constexpr auto UNBOUNDED{ "unbounded" };
+
+                static bool IsValidType(const Type& type)
+                {
+                    return (type == VIEWER ||
+                        type == LOCAL ||
+                        type == LOCAL_FLOOR ||
+                        type == BOUNDED_FLOOR ||
+                        type == UNBOUNDED);
+                }
+
+                ReferenceSpace(System::Session::Impl&, const Type&, Pose);
                 bool TryCreateReferenceSpaceAtOffset(Pose, std::shared_ptr<ReferenceSpace>&);
-                NativeReferenceSpaceType GetType() const;
-                Pose GetTransform() const;
-            private:
+                Type GetType() const;
+
+                struct Impl;
                 std::unique_ptr<Impl> m_impl{};
             };
 
@@ -226,8 +200,8 @@ namespace xr
             Size GetWidthAndHeightForViewIndex(size_t viewIndex) const;
             void SetDepthsNearFar(float depthNear, float depthFar);
 
-            bool TryGetReferenceSpace(NativeReferenceSpaceType, std::shared_ptr<ReferenceSpace>&);
-            bool TryCreateReferenceSpace(NativeReferenceSpaceType, std::shared_ptr<ReferenceSpace>&);
+            bool TryGetReferenceSpace(const ReferenceSpace::Type&, std::shared_ptr<ReferenceSpace>&);
+            bool TryCreateReferenceSpace(const ReferenceSpace::Type&, std::shared_ptr<ReferenceSpace>&);
 
         private:
             std::unique_ptr<Impl> m_impl{};
