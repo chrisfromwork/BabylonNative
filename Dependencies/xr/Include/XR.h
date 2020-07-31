@@ -111,10 +111,10 @@ namespace xr
                         type == UNBOUNDED);
                 }
 
-                ReferenceSpace(System::Session::Impl&, const Type&, Pose);
-                bool TryCreateReferenceSpaceAtOffset(Pose, std::shared_ptr<ReferenceSpace>&);
+                ReferenceSpace(System::Session::Impl&, const Type&, const Pose&);
+                bool TryCreateReferenceSpaceAtOffset(const Pose&, std::shared_ptr<ReferenceSpace>&);
                 Type GetType() const;
-                NativeReferenceSpacePtr GetNativeComponent();
+                NativeReferenceSpacePtr GetNativeComponent() const;
 
             private:
                 struct Impl;

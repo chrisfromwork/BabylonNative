@@ -635,13 +635,13 @@ namespace xr
         XrReferenceSpaceType Type{};
 
         Impl(XrSpace space, XrReferenceSpaceType type, Session::Impl& session)
-            : sessionImpl{ session }
+            : Space(space)
+            , Type (type)
+            , sessionImpl{ session }
         {
-            Space = space;
-            Type = type;
         }
 
-        bool TryCreateReferenceSpaceAtOffset(Pose pose, std::shared_ptr<ReferenceSpace>& referenceSpace)
+        bool TryCreateReferenceSpaceAtOffset(const Pose& pose, std::shared_ptr<ReferenceSpace>& referenceSpace)
         {
             auto xrReferenceSpace = std::make_shared<ReferenceSpace>(sessionImpl, GetType(), pose);
             sessionImpl.XrSpaces.push_back(xrReferenceSpace);
@@ -656,8 +656,7 @@ namespace xr
 
         Pose GetTransform() const
         {
-            if (Space == nullptr ||
-                sessionImpl.CurrXrSceneSpace == nullptr)
+            if (sessionImpl.CurrXrSceneSpace == nullptr)
             {
                 return Pose{};
             }
@@ -719,7 +718,7 @@ namespace xr
             XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
             viewLocateInfo.viewConfigurationType = System::Impl::VIEW_CONFIGURATION_TYPE;
             viewLocateInfo.displayTime = sessionImpl.FrameTime.PredictedDisplayTime;
-            viewLocateInfo.space = static_cast<XrSpace>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent());
+            viewLocateInfo.space = *static_cast<XrSpace*>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent());
             XrCheck(xrLocateViews(session, &viewLocateInfo, &viewState, viewCapacityInput, &viewCountOutput, renderResources.Views.data()));
             assert(viewCountOutput == viewCapacityInput);
             assert(viewCountOutput == renderResources.ConfigViews.size());
@@ -811,7 +810,7 @@ namespace xr
                 {
                     XrSpace space = actionResources.ControllerGripPoseSpaces[idx];
                     XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
-                    XrCheck(xrLocateSpace(space, static_cast<XrSpace>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent()), sessionImpl.FrameTime.PredictedDisplayTime, &location));
+                    XrCheck(xrLocateSpace(space, *static_cast<XrSpace*>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent()), sessionImpl.FrameTime.PredictedDisplayTime, &location));
 
                     constexpr XrSpaceLocationFlags RequiredFlags =
                         XR_SPACE_LOCATION_POSITION_VALID_BIT |
@@ -838,7 +837,7 @@ namespace xr
                 {
                     XrSpace space = actionResources.ControllerAimPoseSpaces[idx];
                     XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
-                    XrCheck(xrLocateSpace(space, static_cast<XrSpace>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent()), sessionImpl.FrameTime.PredictedDisplayTime, &location));
+                    XrCheck(xrLocateSpace(space, *static_cast<XrSpace*>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent()), sessionImpl.FrameTime.PredictedDisplayTime, &location));
 
                     constexpr XrSpaceLocationFlags RequiredFlags =
                         XR_SPACE_LOCATION_POSITION_VALID_BIT |
@@ -899,7 +898,7 @@ namespace xr
             // But mixed reality capture has alpha blend mode display and use alpha channel to blend content to environment.
             layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
 
-            layer.space = static_cast<XrSpace>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent());
+            layer.space = *static_cast<XrSpace*>(m_impl->sessionImpl.CurrXrSceneSpace->GetNativeComponent());
             layer.viewCount = static_cast<uint32_t>(renderResources.ProjectionLayerViews.size());
             layer.views = renderResources.ProjectionLayerViews.data();
 
@@ -1012,7 +1011,7 @@ namespace xr
         return m_impl->sessionImpl.CurrXrSceneSpace;
     }
 
-    System::Session::ReferenceSpace::ReferenceSpace(System::Session::Impl& session, const ReferenceSpace::Type& type, Pose pose)
+    System::Session::ReferenceSpace::ReferenceSpace(System::Session::Impl& session, const ReferenceSpace::Type& type, const Pose& pose)
     {
         XrReferenceSpaceType xrType = TypeConverter::GetXrType(type);
         XrReferenceSpaceCreateInfo spaceCreateInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
@@ -1033,7 +1032,7 @@ namespace xr
         this->m_impl = std::make_unique<ReferenceSpace::Impl>(xrSpace, xrType, session);
     }
 
-    bool System::Session::ReferenceSpace::TryCreateReferenceSpaceAtOffset(Pose pose, std::shared_ptr<ReferenceSpace>& referenceSpace)
+    bool System::Session::ReferenceSpace::TryCreateReferenceSpaceAtOffset(const Pose& pose, std::shared_ptr<ReferenceSpace>& referenceSpace)
     {
         return m_impl->TryCreateReferenceSpaceAtOffset(pose, referenceSpace);
     }
@@ -1043,8 +1042,8 @@ namespace xr
         return m_impl->GetType();
     }
 
-    System::Session::ReferenceSpace::NativeReferenceSpacePtr System::Session::ReferenceSpace::GetNativeComponent()
+    System::Session::ReferenceSpace::NativeReferenceSpacePtr System::Session::ReferenceSpace::GetNativeComponent() const
     {
-        return static_cast<void*>(m_impl->Space);
+        return &m_impl->Space;
     }
 }
