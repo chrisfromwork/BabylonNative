@@ -12,7 +12,7 @@
 	url = https://github.com/KhronosGroup/SPIRV-Cross
 [submodule "bgfx.cmake"]
 	path = Dependencies/bgfx.cmake
-	url = https://github.com/BabylonJS/bgfx.cmake
+	url = https://github.com/chrisfromwork/bgfx.cmake
 [submodule "Dependencies/ios-cmake"]
 	path = Dependencies/ios-cmake
 	url = https://github.com/leetal/ios-cmake.git
